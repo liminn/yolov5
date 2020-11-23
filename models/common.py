@@ -21,6 +21,7 @@ def autopad(k, p=None):  # kernel, padding
 
 def DWConv(c1, c2, k=1, s=1, act=True):
     # Depthwise convolution
+    # my q: why g=math.gcd(c1, c2)
     return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
 
@@ -51,7 +52,7 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
-
+# my q: again
 class BottleneckCSP(nn.Module):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
@@ -78,13 +79,14 @@ class SPP(nn.Module):
         c_ = c1 // 2  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
-        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
+        # my q: why padding=x // 2
+        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k]) 
 
     def forward(self, x):
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
 
-
+# my q: ?
 class Focus(nn.Module):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
@@ -104,7 +106,7 @@ class Concat(nn.Module):
     def forward(self, x):
         return torch.cat(x, self.d)
 
-
+# my q: again
 class NMS(nn.Module):
     # Non-Maximum Suppression (NMS) module
     conf = 0.25  # confidence threshold
@@ -116,7 +118,7 @@ class NMS(nn.Module):
 
     def forward(self, x):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
-
+    
 
 class autoShape(nn.Module):
     # input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
