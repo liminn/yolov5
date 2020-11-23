@@ -86,13 +86,13 @@ class SPP(nn.Module):
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
 
-# my q: ?
+# my note: https://github.com/ultralytics/yolov5/issues/804
 class Focus(nn.Module):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Focus, self).__init__()
         self.conv = Conv(c1 * 4, c2, k, s, p, g, act)
-
+    
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
         return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
 
@@ -118,7 +118,7 @@ class NMS(nn.Module):
 
     def forward(self, x):
         return non_max_suppression(x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes)
-    
+
 
 class autoShape(nn.Module):
     # input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
