@@ -39,33 +39,37 @@ class Conv(nn.Module):
     def fuseforward(self, x):
         return self.act(self.conv(x))
 
-
+# my note: this is Darknet bottleneck, not Resnet bottleneck
 class Bottleneck(nn.Module):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super(Bottleneck, self).__init__()
         c_ = int(c2 * e)  # hidden channels
+        # my note: the first 1x1 conv, decrease half of the channel 
         self.cv1 = Conv(c1, c_, 1, 1)
+        # my note: the Bottleneck ommit the second 1x1 conv, and use the 3x3 conv to increase channels simultaneously
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
-# my q: again
 class BottleneckCSP(nn.Module):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
         super(BottleneckCSP, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
+        # my q: before concat, why need this conv? and why cv2 no bn and relu? 
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
+        # my q: before concat, why need this conv? and why cv3 no bn and relu? 
         self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
         self.cv4 = Conv(2 * c_, c2, 1, 1)
         self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
         self.act = nn.LeakyReLU(0.1, inplace=True)
+        # my note: repeat n times without bottleneck!
         self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)])
-
+        
     def forward(self, x):
         y1 = self.cv3(self.m(self.cv1(x)))
         y2 = self.cv2(x)
@@ -79,21 +83,27 @@ class SPP(nn.Module):
         c_ = c1 // 2  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
-        # my q: why padding=x // 2
+        # my note: https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html
+        # my note: set padding=x // 2, let H_out = H, W_out = W
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k]) 
-
+        
     def forward(self, x):
         x = self.cv1(x)
         return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
-
+    
 # my note: https://github.com/ultralytics/yolov5/issues/804
 class Focus(nn.Module):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Focus, self).__init__()
         self.conv = Conv(c1 * 4, c2, k, s, p, g, act)
-    
+
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
+        # my note: x[..., ::2, ::2] shape: (b, c, w//2, h//2)
+        # my note: x[..., 1::2, ::2] shape: (b, c, w//2, h//2)
+        # my note: x[..., ::2, 1::2] shape: (b, c, w//2, h//2)
+        # my note: x[..., 1::2, 1::2] shape: (b, c, w//2, h//2)
+        # my q: why (b,c,w,h) not (b,c,h,w)?
         return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
 
 

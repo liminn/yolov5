@@ -214,7 +214,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, Bottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, C3]:
             c1, c2 = ch[f], args[0]
-
+            
             # Normal
             # if i > 0 and args[0] != no:  # channel expansion factor
             #     ex = 1.75  # exponential (default 2.0)
@@ -247,7 +247,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[1] = [list(range(args[1] * 2))] * len(f)
         else:
             c2 = ch[f]
-
+        
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
