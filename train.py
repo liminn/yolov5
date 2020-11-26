@@ -381,7 +381,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                 del ckpt
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
-
+    
     if rank in [-1, 0]:
         # Strip optimizers
         n = opt.name if opt.name.isnumeric() else ''
