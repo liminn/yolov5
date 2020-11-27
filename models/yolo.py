@@ -208,7 +208,8 @@ class Model(nn.Module):
     def info(self, verbose=False, img_size=640):  # print model information
         model_info(self, verbose, img_size)
 
-
+# my note: d is a dict, contain all the model config
+# my note: ch is a list, contain all the output channel number of last layer, include input_channels(3)
 def parse_model(d, ch):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
@@ -217,21 +218,23 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     # my note: number of outputs per grid
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
+    # my note: layers is a list, store all the layer
+    # my note: save a a list, and ?
+    # my note: c2 is a number, represent the current output channel number
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
         m = eval(m) if isinstance(m, str) else m  # eval strings
+        # my note: parse "nc", "anchors"
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
             except:
                 pass
         
-        # my note: use "depth_multiple" to control the depth, by control the number of mudules
+        # my note: use "depth_multiple" to control the model depth, by control the number of mudules
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, Bottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, C3]:
-            # my q: when f is a list, how to do?
-            # my note: q solved, under the condition, f is number
-            # my note: c1 is in_channels, c2 is out_channels
+            # my note: c1 respresent in_channels of the mudule, c2 respresent out_channels of the mudule
             c1, c2 = ch[f], args[0]
             
             # Normal
@@ -241,7 +244,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             #     c2 = int(ch[1] * ex ** e)
             # if m != Focus:
 
-            # my note: use "width_multiple" to control the width, by control the number of channels
+            # my note: use "width_multiple" to control the model width, by control the number of out_channels
             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
 
             # Experimental
@@ -253,17 +256,21 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             # if m != Focus:
             #     c2 = make_divisible(c2, 8) if c2 != no else c2
 
-            # my note: update the args info, args = [in_channels, out_channels, *origin_other]
+            # my note: update the args info, args = [in_channels, out_channels, *other]
             args = [c1, c2, *args[1:]]
             # my note: if module is BottleneckCSP, update the args = [in_channels, out_channels, number, *origin_other]
+            # my note: only BottleneckCSP will repeat n times
             if m in [BottleneckCSP, C3]:
                 args.insert(2, n)
+                # my q: why let n=1?
+                # my note: let n=1, when get m_ later, just do m(*args)
                 n = 1
         # my note: if module is nn.BatchNorm2d, update the args = [last_out_channels]
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
-        # my note: update the c2(out_channels)
+        # my note: update c2(out_channels)
         elif m is Concat:
+            # my q : why x+1 ?
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
         elif m is Detect:
             # my note: if module is Detect, update the args = [out_channels_0, out_channels_1, out_channels_2]
@@ -273,18 +280,22 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[1] = [list(range(args[1] * 2))] * len(f)
         else:
             c2 = ch[f]
-        
+        # my q: why *?
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+        # my q: ?
         t = str(m)[8:-2].replace('__main__.', '')  # module type
+        # my q: ?
         np = sum([x.numel() for x in m_.parameters()])  # number params
+        # my q: ?
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         logger.info('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
         # my q: what save save?
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-        # layers is a list, store all the layer
+        # my note: layers is a list, store all the layer
         layers.append(m_)
-        # ch is a list, store all the out channels
+        # my note: ch is a list, store all the out channels
         ch.append(c2)
+    # my q: what sorted(save) is?
     return nn.Sequential(*layers), sorted(save)
 
 
