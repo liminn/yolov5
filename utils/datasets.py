@@ -65,7 +65,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       stride=int(stride),
                                       pad=pad,
                                       rank=rank)
-
+    
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
     sampler = torch.utils.data.distributed.DistributedSampler(dataset) if rank != -1 else None
@@ -356,7 +356,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             assert self.img_files, 'No images found'
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (path, e, help_url))
-
+        
         # Check cache
         self.label_files = img2label_paths(self.img_files)  # labels
         cache_path = str(Path(self.label_files[0]).parent) + '.cache'  # cached labels
@@ -490,6 +490,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 shape = exif_size(im)  # image size
                 assert (shape[0] > 9) & (shape[1] > 9), 'image size <10 pixels'
                 if os.path.isfile(label):
+                    # my note: each line in label txt is: 58 0.622546 0.89961 0.185932 0.09446
                     with open(label, 'r') as f:
                         l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)  # labels
                 if len(l) == 0:
@@ -567,6 +568,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             #     labels = cutout(img, labels)
 
         nL = len(labels)  # number of labels
+        # my q: ????
         if nL:
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
@@ -612,6 +614,7 @@ def load_image(self, index):
         img = cv2.imread(path)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
+        # my note: max length control to 640
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r != 1:  # always resize down, only resize up if training with augmentation
             interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
@@ -645,6 +648,7 @@ def load_mosaic(self, index):
 
     labels4 = []
     s = self.img_size
+    # my note: 320~960
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
     indices = [index] + [random.randint(0, len(self.labels) - 1) for _ in range(3)]  # 3 additional image indices
     for i, index in enumerate(indices):
@@ -673,6 +677,7 @@ def load_mosaic(self, index):
         # Labels
         x = self.labels[index]
         labels = x.copy()
+        # my q: why padw/padh
         if x.size > 0:  # Normalized xywh to pixel xyxy format
             labels[:, 1] = w * (x[:, 1] - x[:, 3] / 2) + padw
             labels[:, 2] = h * (x[:, 2] - x[:, 4] / 2) + padh
@@ -682,7 +687,9 @@ def load_mosaic(self, index):
 
     # Concat/clip labels
     if len(labels4):
+        # my note: a = [[1,2],[3,4]]  np.concatenate(a, 0) -> array([1, 2, 3, 4])
         labels4 = np.concatenate(labels4, 0)
+        # my q: ?
         np.clip(labels4[:, 1:], 0, 2 * s, out=labels4[:, 1:])  # use with random_perspective
         # img4, labels4 = replicate(img4, labels4)  # replicate
 

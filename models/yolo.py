@@ -269,6 +269,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         # my note: update c2(out_channels)
+        # my q: if concat layer, how to pass the several layers?
         elif m is Concat:
             # my q : why x+1 ?
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])

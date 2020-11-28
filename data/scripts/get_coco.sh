@@ -8,13 +8,15 @@
 #     /yolov5
 
 # Download/unzip labels
-d='../' # unzip directory
+#d='../' # unzip directory
+d="/media/dell/6e8a7942-5a27-4e56-bffe-1af5a12aabb4/data/open_source/coco_yolov5/"
 url=https://github.com/ultralytics/yolov5/releases/download/v1.0/
 f='coco2017labels.zip'                                                                 # 68 MB
 echo 'Downloading' $url$f ' ...' && curl -L $url$f -o $f && unzip -q $f -d $d && rm $f # download, unzip, remove
 
 # Download/unzip images
-d='../coco/images' # unzip directory
+#d='../coco/images' # unzip directory
+d='/media/dell/6e8a7942-5a27-4e56-bffe-1af5a12aabb4/data/open_source/coco_yolov5/coco/images' # unzip directory
 url=http://images.cocodataset.org/zips/
 f1='train2017.zip' # 19G, 118k images
 f2='val2017.zip'   # 1G, 5k images
