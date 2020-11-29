@@ -380,7 +380,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
-
+        
+        # my note: ommit for now
         # Rectangular Training
         if self.rect:
             # Sort by aspect ratio
@@ -494,6 +495,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     with open(label, 'r') as f:
                         l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)  # labels
                 if len(l) == 0:
+                    # my q: what is shape(0,5) ??
                     l = np.zeros((0, 5), dtype=np.float32)
                 x[img] = [l, shape]
             except Exception as e:
@@ -586,7 +588,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 img = np.fliplr(img)
                 if nL:
                     labels[:, 1] = 1 - labels[:, 1]
-
+        
+        # my q: why labels_out, and what the 0 index value??
         labels_out = torch.zeros((nL, 6))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
@@ -597,13 +600,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
+    # my note: add the image index to labels_out[:,0]
     @staticmethod
     def collate_fn(batch):
         img, label, path, shapes = zip(*batch)  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
+        # my note: so the batch image shape is (n,3,h,w), the batch label shape is (m,6)
+        # my note: so the batch path shape is (n), the batch shapes shape is (n)(None)
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
-
+        
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
