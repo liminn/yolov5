@@ -138,6 +138,7 @@ def build_targets(p, targets, model):
                         ], device=targets.device).float() * g  # offsets
 
     for i in range(det.nl):
+        # my note: det.anchors shape:(3,3,2),  anchors shape:(3,2)
         anchors = det.anchors[i]
         gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
@@ -145,14 +146,22 @@ def build_targets(p, targets, model):
         # my note: transfer x/y/w/h 0~1 to feature map size
         t = targets * gain
         if nt:
+            # my note: t[:, :, 4:6] shape (3, nt, 2), anchors[:, None] shape (3, 1, 2), so r shape is (3, nt, 2)
+            # my q: why anchors[:, None] shape is (3, 1, 2)
             # Matches
             r = t[:, :, 4:6] / anchors[:, None]  # wh ratio
+            # my note: torch.max(r, 1. / r) shape is (3, nt, 2) torch.max(r, 1. / r).max(2)[0] shape is (3, nt)
+            # my note: j shape is (3, nt) type is bool 
             j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
             # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
+            # my note: t shape is (3*nt', 7) (m,7)
+            # my q: why t become  (3*nt', 7)?
             t = t[j]  # filter
             
             # Offsets
+            # my note: gxy is the positive label center, shape is (m,2)
             gxy = t[:, 2:4]  # grid xy
+            # my note: gain[[2, 3]] shape is (2,)
             gxi = gain[[2, 3]] - gxy  # inverse
             j, k = ((gxy % 1. < g) & (gxy > 1.)).T
             l, m = ((gxi % 1. < g) & (gxi > 1.)).T

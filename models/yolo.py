@@ -101,7 +101,9 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect()
         if isinstance(m, Detect):
             s = 128  # 2x min stride
+            # my note: m.stride = [8, 16, 32]
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            # my note: m.anchors /= [8, 16, 32]
             m.anchors /= m.stride.view(-1, 1, 1)
             check_anchor_order(m)
             self.stride = m.stride
