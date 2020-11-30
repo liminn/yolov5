@@ -107,7 +107,7 @@ class Model(nn.Module):
             self.stride = m.stride
             self._initialize_biases()  # only run once
             # print('Strides: %s' % m.stride.tolist())
-            
+        
         # Init weights, biases
         initialize_weights(self)
         self.info()

@@ -142,6 +142,7 @@ def build_targets(p, targets, model):
         gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
         # Match targets to anchors
+        # my note: transfer x/y/w/h 0~1 to feature map size
         t = targets * gain
         if nt:
             # Matches
@@ -149,7 +150,7 @@ def build_targets(p, targets, model):
             j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
             # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
             t = t[j]  # filter
-
+            
             # Offsets
             gxy = t[:, 2:4]  # grid xy
             gxi = gain[[2, 3]] - gxy  # inverse
