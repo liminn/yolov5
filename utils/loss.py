@@ -129,9 +129,11 @@ def build_targets(p, targets, model):
     tcls, tbox, indices, anch = [], [], [], []
     gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
     ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+    # targets shape (na, nt, 7)
     targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
     g = 0.5  # bias
+    # off shape (5,2)， 分别代表 相对于j(左上角x) k(左上角y) l(右下角x) m(右下角y)
     off = torch.tensor([[0, 0],
                         [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
                         # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
@@ -160,30 +162,51 @@ def build_targets(p, targets, model):
             
             # Offsets
             # my note: gxy is the positive label center, shape is (m,2)
+            # 得到中心点坐标xy(相对于左上角的), (M, 2)
             gxy = t[:, 2:4]  # grid xy
             # my note: gain[[2, 3]] shape is (2,)
+            # 得到中心点相对于右下角的坐标, (M, 2)
             gxi = gain[[2, 3]] - gxy  # inverse
+            # j/k/l/m shape: (1,m)
             j, k = ((gxy % 1. < g) & (gxy > 1.)).T
             l, m = ((gxi % 1. < g) & (gxi > 1.)).T
+            # j shape (5,m)
             j = torch.stack((torch.ones_like(j), j, k, l, m))
+            # t.repeat((5, 1, 1)) shape (5,m,7), final t shape (n,7)
             t = t.repeat((5, 1, 1))[j]
+            # torch.zeros_like(gxy) shape (m,2) torch.zeros_like(gxy)[None] shape (1, m,2), why??
+            # off shape (5,2) off[:, None] shape (5,1,2)
+            # offsets shape (5,m,2) -> (n, 2)
             offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
         else:
             t = targets[0]
             offsets = 0
 
         # Define
+        # t[:, :2].long().T shape is (2,n), b/c shape is (n,)
         b, c = t[:, :2].long().T  # image, class
+        # 中心点回归标签
+        # gxy shape (n, 2)
         gxy = t[:, 2:4]  # grid xy
+        # 长宽回归标签
+        # gwh shape (n, 2)
         gwh = t[:, 4:6]  # grid wh
+        # 对应于原yolov3中，gij = gxy.long()
+        # 通过.long取整，找出index
         gij = (gxy - offsets).long()
+        # gi/gj shape (n,)
         gi, gj = gij.T  # grid xy indices
-
+        
         # Append
+        # a为anchor的索引, shape (n,)
         a = t[:, 6].long()  # anchor indices
+        # 添加索引，方便计算损失的时候取出对应位置的输出
         indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+        # torch.cat((gxy - gij, gwh), 1) shape (n,4)
         tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
+        # anchors[a] shape (n,2)
         anch.append(anchors[a])  # anchors
+        # c shape (n, )
         tcls.append(c)  # class
-
+        
     return tcls, tbox, indices, anch
