@@ -274,16 +274,17 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         # my q: if concat layer, how to pass the several layers?
         elif m is Concat:
             # my q : why x+1 ?
+            # 由于ch首先存储了输入通道数3，因此x + 1
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
         elif m is Detect:
             # my note: if module is Detect, update the args = [out_channels_0, out_channels_1, out_channels_2]
             args.append([ch[x + 1] for x in f])
-            # my q: ???
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         else:
             c2 = ch[f]
         # my q: why *?
+        # 如果是BottleneckCSP,连续调用多次，args需要改变么？
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         # my q: ?
         t = str(m)[8:-2].replace('__main__.', '')  # module type

@@ -63,10 +63,12 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     plots = not opt.evolve  # create plots
     cuda = device.type != 'cpu'
     init_seeds(2 + rank)
+    # 加载数据集信息
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.FullLoader)  # data dict
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
+    # 获取训练集、测试集的txt路径
     train_path = data_dict['train']
     test_path = data_dict['val']
     nc, names = (1, ['item']) if opt.single_cls else (int(data_dict['nc']), data_dict['names'])  # number classes, names
@@ -87,6 +89,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         model.load_state_dict(state_dict, strict=False)  # load
         logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
+        # 创建模型, ch为输入图片通道
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
 
     # Freeze
@@ -98,9 +101,16 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             v.requires_grad = False
     
     # Optimizer
+    """
+    nbs为模拟的batch_size; 
+    这个nbs为64,比如默认的话上面设置的opt.batch_size为16,
+    也就是模型梯度累积了64/16=4(accumulate)次之后
+    再更新一次模型，变相的扩大了batch_size
+    """
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
     # my q: total_batch_size * accumulate / nbs = 1, right?
+    # 根据accumulate设置权重衰减系数
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
     # my q: not understand clear
@@ -125,6 +135,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
     del pg0, pg1, pg2
 
+    # 设置学习率衰减，这里为余弦退火方式进行衰减
     # my q: not understand clear
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
@@ -165,10 +176,16 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         del ckpt, state_dict
 
     # Image sizes
+    # 获取模型总步长
     gs = int(max(model.stride))  # grid size (max stride)
+    # 检查输入图片分辨率确保能够整除总步长gs
     imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]  # verify imgsz are gs-multiples
 
     # DP mode
+    # 分布式训练,参照:https://github.com/ultralytics/yolov5/issues/475
+    # DataParallel模式,仅支持单机多卡
+    # rank为进程编号, 这里应该设置为rank=-1则使用DataParallel模式
+    # rank=-1且gpu数量=1时,不会进行分布式
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
 
@@ -178,6 +195,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         logger.info('Using SyncBatchNorm()')
 
     # EMA
+    # 为模型创建EMA指数滑动平均,如果GPU进程数大于1,则不创建
     ema = ModelEMA(model) if rank in [-1, 0] else None
 
     # DDP mode
@@ -212,6 +230,11 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                     wandb.log({"Labels": [wandb.Image(str(x), caption=x.name) for x in save_dir.glob('*labels*.png')]})
 
             # Anchors
+            """
+            计算默认锚点anchor与数据集标签框的长宽比值
+            标签的长h宽w与anchor的长h_a宽w_a的比值, 即h/h_a, w/w_a都要在(1/hyp['anchor_t'], hyp['anchor_t'])是可以接受的
+            如果标签框满足上面条件的数量小于总数的99%，则根据k-mean算法聚类新的锚点anchor
+            """
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
 
@@ -220,6 +243,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
+    # 根据labels初始化图片采样权重
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
     model.names = names
 
@@ -290,6 +314,9 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
+                # Loss
+                # 计算损失，包括分类损失，objectness损失，框的回归损失
+                # loss为总损失值，loss_items为一个元组，包含分类损失，objectness损失，框的回归损失和总损失
                 loss, loss_items = compute_loss(pred, targets.to(device), model)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
@@ -304,7 +331,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                 optimizer.zero_grad()
                 if ema:
                     ema.update(model)
-
+            
             # Print
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
@@ -470,8 +497,10 @@ if __name__ == '__main__':
         logger.info('Resuming training from %s' % ckpt)
     else:
         # opt.hyp = opt.hyp or ('hyp.finetune.yaml' if opt.weights else 'hyp.scratch.yaml')
+        # 检查配置文件信息
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(opt.cfg), check_file(opt.hyp)  # check files
         assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
+        # 扩展image_size为[image_size, image_size]一个是训练size，一个是测试size
         opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))  # extend to 2 sizes (train, test)
         opt.name = 'evolve' if opt.evolve else opt.name
         opt.save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve)  # increment run
@@ -480,14 +509,18 @@ if __name__ == '__main__':
     device = select_device(opt.device, batch_size=opt.batch_size)
     if opt.local_rank != -1:
         assert torch.cuda.device_count() > opt.local_rank
+        # 根据gpu编号选择设备
         torch.cuda.set_device(opt.local_rank)
         device = torch.device('cuda', opt.local_rank)
+        # 初始化进程组
         dist.init_process_group(backend='nccl', init_method='env://')  # distributed backend
         assert opt.batch_size % opt.world_size == 0, '--batch-size must be multiple of CUDA device count'
+        # 将总批次按照进程数分配给各个gpu
         opt.batch_size = opt.total_batch_size // opt.world_size
 
     # Hyperparameters
     with open(opt.hyp) as f:
+        # 加载超参数列表
         hyp = yaml.load(f, Loader=yaml.FullLoader)  # load hyps
         if 'box' not in hyp:
             warn('Compatibility: %s missing "box" which was renamed from "giou" in %s' %
@@ -496,6 +529,7 @@ if __name__ == '__main__':
 
     # Train
     logger.info(opt)
+    # 如果不进行超参数进化，则直接调用train()函数，开始训练
     if not opt.evolve:
         tb_writer = None  # init loggers
         if opt.global_rank in [-1, 0]:
