@@ -429,8 +429,9 @@ if __name__ == '__main__':
     parser.add_argument('--notest', action='store_true', help='only test final epoch')
     parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
     parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
-    # my q: ?
+    # 谷歌云盘bucket，一般不会用到
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
+    # 是否提前缓存图片到内存，以加快训练速度，默认False
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -447,13 +448,18 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     # Set DDP variables
+    """
+    设置DDP模式的参数
+    world_size:表示全局进程个数
+    global_rank:进程编号
+    """
     opt.total_batch_size = opt.batch_size
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
     if opt.global_rank in [-1, 0]:
         check_git_status()
-
+    
     # Resume
     if opt.resume:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
