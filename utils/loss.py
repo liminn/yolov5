@@ -72,6 +72,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     """
     device = targets.device
     lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+    # 获得标签分类，边框，索引，anchor
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
     h = model.hyp  # hyperparameters
 
@@ -86,31 +87,49 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     g = h['fl_gamma']  # focal loss gamma
     if g > 0:
         BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
-
+    
     # Losses
     nt = 0  # number of targets
     no = len(p)  # number of outputs
+    # 设置三个特征图对应输出的损失系数
     balance = [4.0, 1.0, 0.4] if no == 3 else [4.0, 1.0, 0.4, 0.1]  # P3-5 or P3-6
     for i, pi in enumerate(p):  # layer index, layer predictions
+        # 根据indices获取索引，方便找到对应网格的输出
         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+        # 置信度，shape (b, 3, h, w, 1)
         tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
         n = b.shape[0]  # number of targets
         if n:
             nt += n  # cumulative targets
+            # 找到对应网格的输出
+            # ps shape (n, 85)
             ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
 
             # Regression
+            # 对输出xywh做反算
+            # 其实这里的操作就是把xywh的logits，转换成预测值，在infernce时也这么写
+            # pxy shape (n, 2)
             pxy = ps[:, :2].sigmoid() * 2. - 0.5
+            # pwh shape (n, 2)
             pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+            # pbox shape (n, 2)
             pbox = torch.cat((pxy, pwh), 1).to(device)  # predicted box
+            # 计算边框损失，注意这个CIoU=True，计算的是ciou损失
+            # 看giou，diou，ciou原理，看ciou代码
+            # iou shape ??
             iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
             lbox += (1.0 - iou).mean()  # iou loss
 
             # Objectness
+            # 根据model.gr设置objectness的标签值
+            # 这里model.gr=1，也就是说完全使用标签框与预测框的giou值来作为该预测框的objectness标签
+            # iou 的shape是什么，如何赋值给tobj相应元素的？shape是如何对应上的
             tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
-
+            
             # Classification
+            # 设置如果类别数大于1才计算分类损失
+            # 看一下上面的label smoothing， 理一下这儿的维度
             if model.nc > 1:  # cls loss (only if multiple classes)
                 t = torch.full_like(ps[:, 5:], cn, device=device)  # targets
                 t[range(n), tcls[i]] = cp

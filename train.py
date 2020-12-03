@@ -242,6 +242,11 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     hyp['cls'] *= nc / 80.  # scale coco-tuned hyp['cls'] to current dataset
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
+    """
+    设置giou的值在objectness loss中做标签的系数, 使用代码如下
+    tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)
+    这里model.gr=1，也就是说完全使用标签框与预测框的giou值来作为该预测框的objectness标签
+    """
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
     # 根据labels初始化图片采样权重
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights

@@ -68,11 +68,11 @@ class Detect(nn.Module):
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 # my note: z is a list, z[i] shape is (bs, 3*h*w, 85)
                 z.append(y.view(bs, -1, self.no))
-                
+
         # my note: if training, return x, x[i] shape is (bs,3,h,w,85)
         # my note: if not training, return (bs, 3*3*h*w, 85) and x 
         return x if self.training else (torch.cat(z, 1), x)
-
+        
     # my q: why staticmethod?
     @staticmethod
     def _make_grid(nx=20, ny=20):
