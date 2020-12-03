@@ -589,7 +589,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 1] = 1 - labels[:, 1]
         
-        # my q: why labels_out, and what the 0 index value??
+        # 初始化标签框对应的图片序号，配合下面的collate_fn使用
         labels_out = torch.zeros((nL, 6))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
@@ -601,6 +601,15 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
     # my note: add the image index to labels_out[:,0]
+    """
+    pytorch的DataLoader打包一个batch的数据集时要经过此函数进行打包
+    通过重写此函数实现标签与图片对应的划分，一个batch中哪些标签属于哪一张图片,形如
+    [[0, 6, 0.5, 0.5, 0.26, 0.35],
+     [0, 6, 0.5, 0.5, 0.26, 0.35],
+     [1, 6, 0.5, 0.5, 0.26, 0.35],
+     [2, 6, 0.5, 0.5, 0.26, 0.35],]
+     前两行标签属于第一张图片，第三行属于第二张。。。
+    """
     @staticmethod
     def collate_fn(batch):
         img, label, path, shapes = zip(*batch)  # transposed

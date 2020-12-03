@@ -41,6 +41,7 @@ class Detect(nn.Module):
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
 
+    # yolo model中的forward_once传递x
     def forward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
@@ -67,7 +68,7 @@ class Detect(nn.Module):
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 # my note: z is a list, z[i] shape is (bs, 3*h*w, 85)
                 z.append(y.view(bs, -1, self.no))
-        
+                
         # my note: if training, return x, x[i] shape is (bs,3,h,w,85)
         # my note: if not training, return (bs, 3*3*h*w, 85) and x 
         return x if self.training else (torch.cat(z, 1), x)
