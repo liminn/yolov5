@@ -113,14 +113,14 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             pxy = ps[:, :2].sigmoid() * 2. - 0.5
             # pwh shape (n, 2)
             pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
-            # pbox shape (n, 2)
+            # pbox shape (n, 4)
             pbox = torch.cat((pxy, pwh), 1).to(device)  # predicted box
             # 计算边框损失，注意这个CIoU=True，计算的是ciou损失
             # 看giou，diou，ciou原理，看ciou代码
-            # iou shape ??
+            # pbox.T shape: (4,n)  tbox[i] shape: (n,4)
             iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
             lbox += (1.0 - iou).mean()  # iou loss
-
+            
             # Objectness
             # 根据model.gr设置objectness的标签值
             # 这里model.gr=1，也就是说完全使用标签框与预测框的giou值来作为该预测框的objectness标签

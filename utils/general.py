@@ -186,7 +186,10 @@ def clip_coords(boxes, img_shape):
 
 
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-9):
+    # box1 shape: (4,n)  box2 shape: (n,4)
+    
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+    # box2 shape (4,n)
     box2 = box2.T
 
     # Get the coordinates of bounding boxes
@@ -194,41 +197,57 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         b1_x1, b1_y1, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3]
         b2_x1, b2_y1, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3]
     else:  # transform from xywh to xyxy
+        # box1[0] shape: (n,)
+        # 得到box1的左上角x坐标，和右下角x坐标
         b1_x1, b1_x2 = box1[0] - box1[2] / 2, box1[0] + box1[2] / 2
+        # 得到box1的左上角y坐标，和右下角y坐标
         b1_y1, b1_y2 = box1[1] - box1[3] / 2, box1[1] + box1[3] / 2
         b2_x1, b2_x2 = box2[0] - box2[2] / 2, box2[0] + box2[2] / 2
         b2_y1, b2_y2 = box2[1] - box2[3] / 2, box2[1] + box2[3] / 2
-
+    
     # Intersection area
+    # 计算交集，inter shape: (n,)
     inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
             (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
 
-    # Union Area
+    # 计算并集
+    # Union Area， union shape: (n,)
     w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
     w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
     union = w1 * h1 + w2 * h2 - inter + eps
 
+    # 计算iou， iou shape: (n,)
     iou = inter / union
     if GIoU or DIoU or CIoU:
+        # 计算最小封闭矩形的宽，cw shape: (n,)
         cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
+        # 计算最小封闭矩形的高，ch shape: (n,)
         ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
         if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            # 计算最小封闭矩形的对角线长度的平方，c2对应于公式中的c^2, c2 shape (n,)
             c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+            # 计算box1和box2的中心点距离的平方，rho2对应于公式中的d^2, rho2 shape (n,)
             rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 +
                     (b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center distance squared
             if DIoU:
+                # 计算DIoU，shape (n,), 对应于公式 DIoU = IoU - d^2/c^2
                 return iou - rho2 / c2  # DIoU
             elif CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                # 计算CIou中的变量v, shape (n,)
                 v = (4 / math.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
                 with torch.no_grad():
+                    # 计算CIou中的变量v的系数alpha, shape (n,)
                     alpha = v / ((1 + eps) - iou + v)
+                # 计算CIoU，shape (n,), 对应于公式 CIoU = IoU - d^2/c^2 - alpha*v
                 return iou - (rho2 / c2 + v * alpha)  # CIoU
         else:  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+            # 计算GIoU中C的面积，shape (n,),
             c_area = cw * ch + eps  # convex area
+            # 计算GIoU，shape (n,), 对应于公式 GIoU = IoU - (C-B1UB2)/C
             return iou - (c_area - union) / c_area  # GIoU
     else:
+        # 直接返回IoU
         return iou  # IoU
-
 
 def box_iou(box1, box2):
     # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
