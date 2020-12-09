@@ -1,8 +1,8 @@
 import argparse
-import glob
 import json
 import os
 from pathlib import Path
+from threading import Thread
 
 import numpy as np
 import torch
@@ -14,8 +14,8 @@ from utils.datasets import create_dataloader
 from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
     non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path
 from utils.loss import compute_loss
-from utils.metrics import ap_per_class
-from utils.plots import plot_images, output_to_target
+from utils.metrics import ap_per_class, ConfusionMatrix
+from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized
 
 
@@ -33,7 +33,8 @@ def test(data,
          dataloader=None,
          save_dir=Path(''),  # for saving images
          save_txt=False,  # for auto-labelling
-         save_conf=False,
+         save_hybrid=False,  # for hybrid auto-labelling
+         save_conf=False,  # save auto-label confidences
          plots=True,
          log_imgs=0):  # number of logged images
 
@@ -45,7 +46,6 @@ def test(data,
     else:  # called directly
         set_logging()
         device = select_device(opt.device, batch_size=batch_size)
-        save_txt = opt.save_txt  # save *.txt labels
 
         # Directories
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
@@ -89,6 +89,7 @@ def test(data,
         dataloader = create_dataloader(path, imgsz, batch_size, model.stride.max(), opt, pad=0.5, rect=True)[0]
 
     seen = 0
+    confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
     s = ('%20s' + '%12s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
@@ -101,9 +102,7 @@ def test(data,
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
-        whwh = torch.Tensor([width, height, width, height]).to(device)
 
-        # Disable gradients
         with torch.no_grad():
             # Run model
             t = time_synchronized()
@@ -111,12 +110,14 @@ def test(data,
             t0 += time_synchronized() - t
 
             # Compute loss
-            if training:  # if model has loss hyperparameters
+            if training:
                 loss += compute_loss([x.float() for x in train_out], targets, model)[1][:3]  # box, obj, cls
 
             # Run NMS
+            targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+            lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             t = time_synchronized()
-            output = non_max_suppression(inf_out, conf_thres=conf_thres, iou_thres=iou_thres)
+            output = non_max_suppression(inf_out, conf_thres=conf_thres, iou_thres=iou_thres, labels=lb)
             t1 += time_synchronized() - t
 
         # Statistics per image
@@ -174,8 +175,10 @@ def test(data,
                 tcls_tensor = labels[:, 0]
 
                 # target boxes
-                tbox = xywh2xyxy(labels[:, 1:5]) * whwh
+                tbox = xywh2xyxy(labels[:, 1:5])
                 scale_coords(img[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
+                if plots:
+                    confusion_matrix.process_batch(pred, torch.cat((labels[:, 0:1], tbox), 1))
 
                 # Per target class
                 for cls in torch.unique(tcls_tensor):
@@ -203,10 +206,10 @@ def test(data,
 
         # Plot images
         if plots and batch_i < 3:
-            f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
-            plot_images(img, targets, paths, f, names)  # labels
-            f = save_dir / f'test_batch{batch_i}_pred.jpg'
-            plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+            f = save_dir / f'test_batch{batch_i}_labels.jpg'  # labels
+            Thread(target=plot_images, args=(img, targets, paths, f, names), daemon=True).start()
+            f = save_dir / f'test_batch{batch_i}_pred.jpg'  # predictions
+            Thread(target=plot_images, args=(img, output_to_target(output), paths, f, names), daemon=True).start()
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
@@ -217,11 +220,6 @@ def test(data,
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
-
-    # W&B logging
-    if plots and wandb and wandb.run:
-        wandb.log({"Images": wandb_images})
-        wandb.log({"Validation": [wandb.Image(str(x), caption=x.name) for x in sorted(save_dir.glob('test*.jpg'))]})
 
     # Print results
     pf = '%20s' + '%12.3g' * 6  # print format
@@ -237,10 +235,17 @@ def test(data,
     if not training:
         print('Speed: %.1f/%.1f/%.1f ms inference/NMS/total per %gx%g image at batch-size %g' % t)
 
+    # Plots
+    if plots:
+        confusion_matrix.plot(save_dir=save_dir, names=list(names.values()))
+        if wandb and wandb.run:
+            wandb.log({"Images": wandb_images})
+            wandb.log({"Validation": [wandb.Image(str(f), caption=f.name) for f in sorted(save_dir.glob('test*.jpg'))]})
+
     # Save JSON
     if save_json and len(jdict):
         w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = glob.glob('../coco/annotations/instances_val*.json')[0]  # annotations json
+        anno_json = '../coco/annotations/instances_val2017.json'  # annotations json
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
         with open(pred_json, 'w') as f:
@@ -260,11 +265,12 @@ def test(data,
             eval.summarize()
             map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
         except Exception as e:
-            print('ERROR: pycocotools unable to run: %s' % e)
+            print(f'pycocotools unable to run: {e}')
 
     # Return results
     if not training:
-        print('Results saved to %s' % save_dir)
+        s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
+        print(f"Results saved to {save_dir}{s}")
     model.float()  # for training
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
@@ -286,6 +292,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--save-hybrid', action='store_true', help='save label+prediction hybrid results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
     parser.add_argument('--project', default='runs/test', help='save to project/name')
@@ -307,7 +314,8 @@ if __name__ == '__main__':
              opt.single_cls,
              opt.augment,
              opt.verbose,
-             save_txt=opt.save_txt,
+             save_txt=opt.save_txt | opt.save_hybrid,
+             save_hybrid=opt.save_hybrid,
              save_conf=opt.save_conf,
              )
 
@@ -318,8 +326,9 @@ if __name__ == '__main__':
             y = []  # y axis
             for i in x:  # img-size
                 print('\nRunning %s point %s...' % (f, i))
-                r, _, t = test(opt.data, weights, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json)
+                r, _, t = test(opt.data, weights, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json,
+                               plots=False)
                 y.append(r + t)  # results and times
             np.savetxt(f, y, fmt='%10.4g')  # save
         os.system('zip -r study.zip study_*.txt')
-        # utils.plots.plot_study_txt(f, x)  # plot
+        plot_study_txt(f, x)  # plot
