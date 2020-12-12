@@ -330,6 +330,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
 def img2label_paths(img_paths):
     # Define label paths as a function of image paths
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
+    # 将/images/替换成/labels/， 将.jpg替换成'.txt'
     return [x.replace(sa, sb, 1).replace('.' + x.split('.')[-1], '.txt') for x in img_paths]
 
 
@@ -348,29 +349,40 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
+                # 使用pathlib.Path生成与操作系统无关的路径，因为不同操作系统路径的‘/’会有所不同
                 p = Path(p)  # os-agnostic
+                # 如果路径path为包含图片的文件夹路径
                 if p.is_dir():  # dir
                     f += glob.glob(str(p / '**' / '*.*'), recursive=True)
+                # 如果路径path为包含图片路径的txt文件
                 elif p.is_file():  # file
                     with open(p, 'r') as t:
                         t = t.read().strip().splitlines()
+                        # 获取数据集路径的上级父目录，os.sep为路径里的破折号(不同系统路径破折号不同，os.sep根据系统自适应)
                         parent = str(p.parent) + os.sep
+                        # 替换相对路径为绝对路径
                         f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
                 else:
                     raise Exception('%s does not exist' % p)
+            # 破折号替换为os.sep，os.path.splitext(x)将文件名与扩展名分开并返回一个列表
+            # self.img_files是一个列表，里面存储了所有的图片路径
             self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])
             assert self.img_files, 'No images found'
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (path, e, help_url))
         
         # Check cache
+        # 获取label的文件路径
+        # self.label_files是一个列表，里面存储了所有的label txt路径
         self.label_files = img2label_paths(self.img_files)  # labels
+        # with_suffix(suffix) 替换指定扩展名，返回新的路径，指定扩展名存在则不变
         cache_path = Path(self.label_files[0]).parent.with_suffix('.cache')  # cached labels
         if cache_path.is_file():
             cache = torch.load(cache_path)  # load
             if cache['hash'] != get_hash(self.label_files + self.img_files) or 'results' not in cache:  # changed
                 cache = self.cache_labels(cache_path)  # re-cache
         else:
+            #获取cache，cache = {"im_file":[l, shape], ..., "hash":xx, "results":[nf, nm, ne, nc, i + 1]}
             cache = self.cache_labels(cache_path)  # cache
 
         # Display cache
@@ -381,18 +393,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Read cache
         cache.pop('hash')  # remove hash
+        # labels为列表，每一项均为一个图片的label，即一个(m,5)数组，包含一张图片的所有标签，[[45,0.479492,0.688771,0.955609,0.5955],...]
+        # shapes为列表，包含所有图片的shape，每一项均为(w,h)
         labels, shapes = zip(*cache.values())
         self.labels = list(labels)
         self.shapes = np.array(shapes, dtype=np.float64)
+        # self.img_files为列表，每一项为图片路径
         self.img_files = list(cache.keys())  # update
+        # self.label_files是一个列表，里面存储了所有的label txt路径
         self.label_files = img2label_paths(cache.keys())  # update
         if single_cls:
             for x in self.labels:
                 x[:, 0] = 0
-
+    
         n = len(shapes)  # number of images
+        # 获取每张图片，所属batch的索引
         bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        # 一个epoch中batch的数量
         nb = bi[-1] + 1  # number of batches
+        # self.batch为列表，其中每一项为图片所属batch的索引
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = range(n)
@@ -402,7 +421,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Sort by aspect ratio
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # aspect ratio
+            # 获取根据ar从小到大排序的索引 argsort函数返回的是数组值从小到大的索引值
             irect = ar.argsort()
+            # 根据索引排序数据集与标签路径、shape、h/w
             self.img_files = [self.img_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
@@ -412,10 +433,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Set training image shapes
             shapes = [[1, 1]] * nb
             for i in range(nb):
+                # 得到属于第i个batch的所有h/w
                 ari = ar[bi == i]
                 mini, maxi = ari.min(), ari.max()
+                # 如果一个batch中最大的h/w小于1，则此batch的shape为(img_size*maxi, img_size)
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
+                 # 如果一个batch中最小的h/w大于1，则此batch的shape为(img_size, img_size/mini)
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
@@ -436,6 +460,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def cache_labels(self, path=Path('./labels.cache')):
         # Cache dataset labels, check images and read shapes
         x = {}  # dict
+        # 漏掉的标签数量，找到的标签数量，空的标签数量，损坏的标签数量
         nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, duplicate
         pbar = tqdm(zip(self.img_files, self.label_files), desc='Scanning images', total=len(self.img_files))
         for i, (im_file, lb_file) in enumerate(pbar):
@@ -443,18 +468,27 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 # verify images
                 im = Image.open(im_file)
                 im.verify()  # PIL verify
+                # shape为图像的宽高，(width, height)
                 shape = exif_size(im)  # image size
                 assert (shape[0] > 9) & (shape[1] > 9), 'image size <10 pixels'
-
+                
                 # verify labels
                 if os.path.isfile(lb_file):
+                    # 找到标签的数量加1
                     nf += 1  # label found
+                    # 在txt中，每一行的内容为：45 0.479492 0.688771 0.955609 0.5955
+                    # 读取标签txt文件，标签格式为：class x y w h
                     with open(lb_file, 'r') as f:
+                        # l为一个(m,5)数组，包含一张图片的所有标签，[[45,0.479492,0.688771,0.955609,0.5955],...]
                         l = np.array([x.split() for x in f.read().strip().splitlines()], dtype=np.float32)  # labels
                     if len(l):
+                        # 判断标签是否有五列
                         assert l.shape[1] == 5, 'labels require 5 columns each'
+                        # 判断标签是否全部>=0
                         assert (l >= 0).all(), 'negative labels'
+                        # 判断标签坐标x y w h是否归一化
                         assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
+                        # 找出标签中重复的坐标
                         assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'
                     else:
                         ne += 1  # label empty
@@ -462,6 +496,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     nm += 1  # label missing
                     l = np.zeros((0, 5), dtype=np.float32)
+                # x = {"im_file" : [l, shape], ...}
                 x[im_file] = [l, shape]
             except Exception as e:
                 nc += 1
@@ -472,9 +507,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         if nf == 0:
             print(f'WARNING: No labels found in {path}. See {help_url}')
-
+        # x = {"im_file":[l, shape], ..., "hash":xx, "results":[nf, nm, ne, nc, i + 1]}
         x['hash'] = get_hash(self.label_files + self.img_files)
         x['results'] = [nf, nm, ne, nc, i + 1]
+        # 保存x的快照，下次直接使用
         torch.save(x, path)  # save for next time
         logging.info(f"New cache created: {path}")
         return x
@@ -495,6 +531,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
             # Load mosaic
+            # 待看，看这个
             img, labels = load_mosaic(self, index)
             shapes = None
 
@@ -506,14 +543,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 labels = np.concatenate((labels, labels2), 0)
 
         else:
+            # 看这儿
             # Load image
+            # 返回image，原始高/宽，缩放之后的高/宽
             img, (h0, w0), (h, w) = load_image(self, index)
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-
+            
             # Load labels
             labels = []
             x = self.labels[index]
@@ -528,13 +567,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.augment:
             # Augment imagespace
             if not mosaic:
+                # 随机对图片进行旋转，平移，缩放，裁剪
                 img, labels = random_perspective(img, labels,
                                                  degrees=hyp['degrees'],
                                                  translate=hyp['translate'],
                                                  scale=hyp['scale'],
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'])
-
+            # 随机改变图片的色调（H），饱和度（S），亮度（V）
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
@@ -543,9 +583,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             #     labels = cutout(img, labels)
 
         nL = len(labels)  # number of labels
-        # my q: ????
         if nL:
+            # 经过mosaic之后，此时的label是 pixel xyxy format
+            # 调整框的标签，pixel xyxy to pixel xywh
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
+            # 重新归一化标签0-1
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
 
@@ -602,7 +644,7 @@ def load_image(self, index):
         img = cv2.imread(path)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
-        # my note: max length control to 640
+        # 将长边缩放成self.img_size，另一边等比例缩放
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r != 1:  # always resize down, only resize up if training with augmentation
             interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
