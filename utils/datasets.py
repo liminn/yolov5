@@ -633,7 +633,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # my note: so the batch image shape is (n,3,h,w), the batch label shape is (m,6)
         # my note: so the batch path shape is (n), the batch shapes shape is (n)(None)
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
-        
+
+
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
@@ -652,7 +653,6 @@ def load_image(self, index):
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
     else:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
-
 
 def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
     r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
@@ -701,9 +701,10 @@ def load_mosaic(self, index):
             x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
 
         img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+        # 疑问：这个padw和padh怎么理解？？？
         padw = x1a - x1b
         padh = y1a - y1b
-
+        
         # Labels
         x = self.labels[index]
         labels = x.copy()
