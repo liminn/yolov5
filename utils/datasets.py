@@ -687,43 +687,56 @@ def load_mosaic(self, index):
 
         # place img in img4
         if i == 0:  # top left
+            # 如果是第一次，则定义1280x1280大小的图像
             img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+            # img4中top left区域的左上角坐标和右下角坐标，原则是尽量覆盖img区域
             x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
+            # img中的左上角坐标和右下角坐标，对应img4中top left区域
             x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
         elif i == 1:  # top right
+            # img4中top right区域的左上角坐标和右下角坐标，原则是尽量覆盖img区域
             x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
+            # img中的左上角坐标和右下角坐标，对应img4中top right区域
+            # 疑问：为什么是min(w, x2a - x1a)，而不是x2a - x1a
             x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
         elif i == 2:  # bottom left
+            # img4中bottom left区域的左上角坐标和右下角坐标，原则是尽量覆盖img区域
             x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
+            # img中的左上角坐标和右下角坐标，对应img4中bottom left区域
+            # 疑问：为什么是min(y2a - y1a, h)，而不是y2a - y1a
             x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
         elif i == 3:  # bottom right
+            # img4中 bottom right区域的左上角坐标和右下角坐标，原则是尽量覆盖img区域
             x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
+            # img中的左上角坐标和右下角坐标，对应img4中bottom right区域
+            # 疑问：为什么是min(w, x2a - x1a), min(y2a - y1a, h)，而不是x2a - x1a，y2a - y1a
             x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
 
         img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
-        # 疑问：这个padw和padh怎么理解？？？
+        # 将在img中的box的坐标，转换到img4中的坐标，所需的x方向偏移padw，和y方向偏移padh
+        # 疑问：这儿不太理解
         padw = x1a - x1b
         padh = y1a - y1b
         
         # Labels
         x = self.labels[index]
         labels = x.copy()
-        # my q: why padw/padh
+        # 将在img中的box的坐标，全部转换到到img4中的坐标，像素坐标
         if x.size > 0:  # Normalized xywh to pixel xyxy format
             labels[:, 1] = w * (x[:, 1] - x[:, 3] / 2) + padw
             labels[:, 2] = h * (x[:, 2] - x[:, 4] / 2) + padh
             labels[:, 3] = w * (x[:, 1] + x[:, 3] / 2) + padw
             labels[:, 4] = h * (x[:, 2] + x[:, 4] / 2) + padh
         labels4.append(labels)
-
+        
     # Concat/clip labels
     if len(labels4):
-        # my note: a = [[1,2],[3,4]]  np.concatenate(a, 0) -> array([1, 2, 3, 4])
+        # labels4 shape:  (m1+m2+m3+...,5) = (m',5) 
         labels4 = np.concatenate(labels4, 0)
-        # my q: ?
+        # 对labels4中的box进行修正，将超过img4边界的box，缩小至边界
         np.clip(labels4[:, 1:], 0, 2 * s, out=labels4[:, 1:])  # use with random_perspective
         # img4, labels4 = replicate(img4, labels4)  # replicate
-
+    
     # Augment
     img4, labels4 = random_perspective(img4, labels4,
                                        degrees=self.hyp['degrees'],
@@ -790,7 +803,9 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
 
+    # 640
     height = img.shape[0] + border[0] * 2  # shape(h,w,c)
+    # 640
     width = img.shape[1] + border[1] * 2
 
     # Center
@@ -820,7 +835,8 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
     T = np.eye(3)
     T[0, 2] = random.uniform(0.5 - translate, 0.5 + translate) * width  # x translation (pixels)
     T[1, 2] = random.uniform(0.5 - translate, 0.5 + translate) * height  # y translation (pixels)
-
+    
+    # 疑问：https://en.wikipedia.org/wiki/Affine_transformation
     # Combined rotation matrix
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
@@ -828,7 +844,7 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
             img = cv2.warpPerspective(img, M, dsize=(width, height), borderValue=(114, 114, 114))
         else:  # affine
             img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
-
+    
     # Visualize
     # import matplotlib.pyplot as plt
     # ax = plt.subplots(1, 2, figsize=(12, 6))[1].ravel()
@@ -865,6 +881,7 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
         xy[:, [0, 2]] = xy[:, [0, 2]].clip(0, width)
         xy[:, [1, 3]] = xy[:, [1, 3]].clip(0, height)
 
+        # 过滤掉一些框，超过这些条件的框，不进行检测，算背景
         # filter candidates
         i = box_candidates(box1=targets[:, 1:5].T * s, box2=xy.T)
         targets = targets[i]
