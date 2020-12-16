@@ -808,6 +808,7 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
     # 640
     width = img.shape[1] + border[1] * 2
 
+    # 将img的中心点，移动到坐标原点
     # Center
     C = np.eye(3)
     C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
@@ -818,6 +819,8 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
     P[2, 0] = random.uniform(-perspective, perspective)  # x perspective (about y)
     P[2, 1] = random.uniform(-perspective, perspective)  # y perspective (about x)
 
+    # cv2.getRotationMatrix2D方便的地方是，可以指定中心点进行旋转
+    # 可以不用cv2.getRotationMatrix2D，拆解成rotation和scale两个矩阵
     # Rotation and Scale
     R = np.eye(3)
     a = random.uniform(-degrees, degrees)
@@ -836,7 +839,10 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
     T[0, 2] = random.uniform(0.5 - translate, 0.5 + translate) * width  # x translation (pixels)
     T[1, 2] = random.uniform(0.5 - translate, 0.5 + translate) * height  # y translation (pixels)
     
-    # 疑问：https://en.wikipedia.org/wiki/Affine_transformation
+    # 疑问：为什么要从左到右？
+    # 参考：https://en.wikipedia.org/wiki/Affine_transformation
+    # 参考：https://medium.com/uruvideo/dataset-augmentation-with-random-homographies-a8f4b44830d4
+    # https://en.wikipedia.org/wiki/Affine_transformation#/media/File:2D_affine_transformation_matrix.svg
     # Combined rotation matrix
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
@@ -844,7 +850,7 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
             img = cv2.warpPerspective(img, M, dsize=(width, height), borderValue=(114, 114, 114))
         else:  # affine
             img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
-    
+
     # Visualize
     # import matplotlib.pyplot as plt
     # ax = plt.subplots(1, 2, figsize=(12, 6))[1].ravel()
@@ -862,10 +868,12 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
             xy = (xy[:, :2] / xy[:, 2:3]).reshape(n, 8)  # rescale
         else:  # affine
             xy = xy[:, :2].reshape(n, 8)
-
+        
         # create new boxes
         x = xy[:, [0, 2, 4, 6]]
         y = xy[:, [1, 3, 5, 7]]
+        #a.min(0) axis=0, 每列的最小值 a.min(1) axis=1, 每行的最小值
+        # 找到旋转后边框的最小外接矩形， xy shape (n, 4)
         xy = np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1))).reshape(4, n).T
 
         # # apply angle-based reduction of bounding boxes
@@ -877,6 +885,8 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
         # h = (xy[:, 3] - xy[:, 1]) * reduction
         # xy = np.concatenate((x - w / 2, y - h / 2, x + w / 2, y + h / 2)).reshape(4, n).T
 
+        # 对边框进行修正，去除超过
+        # 疑问，为什么是小于width和height？
         # clip boxes
         xy[:, [0, 2]] = xy[:, [0, 2]].clip(0, width)
         xy[:, [1, 3]] = xy[:, [1, 3]].clip(0, height)
@@ -888,8 +898,8 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
         targets[:, 1:5] = xy[i]
 
     return img, targets
-
-
+    
+    
 def box_candidates(box1, box2, wh_thr=2, ar_thr=20, area_thr=0.1):  # box1(4,n), box2(4,n)
     # Compute candidate boxes: box1 before augment, box2 after augment, wh_thr (pixels), aspect_ratio_thr, area_ratio
     w1, h1 = box1[2] - box1[0], box1[3] - box1[1]
