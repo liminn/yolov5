@@ -444,7 +444,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     shapes[i] = [1, 1 / mini]
 
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
-
+            
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
         if cache_images:
@@ -504,7 +504,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             pbar.desc = f"Scanning '{path.parent / path.stem}' for images and labels... " \
                         f"{nf} found, {nm} missing, {ne} empty, {nc} corrupted"
-
+        
         if nf == 0:
             print(f'WARNING: No labels found in {path}. See {help_url}')
         # x = {"im_file":[l, shape], ..., "hash":xx, "results":[nf, nm, ne, nc, i + 1]}
@@ -526,7 +526,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-
+        
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
