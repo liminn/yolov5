@@ -216,12 +216,13 @@ class Model(nn.Module):
 # my note: ch is a list, contain all the output channel number of last layer, include input_channels(3)
 def parse_model(d, ch):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
+    # anchors: [[10,13, 16,30, 33,23], [...], [...]]
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     # my note: number of anchors per grid
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     # my note: number of outputs per grid
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
+    
     # my note: layers is a list, store all the layer
     # my note: save a a list, and ?
     # my note: c2 is a number, represent the current output channel number

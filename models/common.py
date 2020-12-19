@@ -119,7 +119,7 @@ class Focus(nn.Module):
         # my note: x[..., 1::2, 1::2] shape: (b, c, w//2, h//2)
         # my q: why (b,c,w,h) not (b,c,h,w)?
         return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
-
+        
 
 class Concat(nn.Module):
     # Concatenate a list of tensors along dimension
